@@ -26,26 +26,62 @@ function generateType(typeName, typeSchema) {
   writeFile(`${targetDirectory}/${typeName}.ts`, generatedCode);
 }
 
-function getGeneratedCode(typeName, typeSchema) {
-  const generatedType = getGeneratedType(typeSchema);
+function getGeneratedType(typeSchema, imports) {
+  if (typeSchema.$ref) {
+    const refType = typeSchema.$ref.split('/').pop();
+    imports.add(refType);
+    return refType;
+  }
 
-  return `export type ${typeName} = ${generatedType};`;
-}
+  if (typeSchema.oneOf) {
+    return `(${typeSchema.oneOf.map(schema => getGeneratedType(schema, imports)).join(' | ')})`;
+  }
 
-function getGeneratedType(typeSchema) {
-  const schemaType = typeSchema.type;
+  if (typeSchema.allOf) {
+    return typeSchema.allOf.map(schema => getGeneratedType(schema, imports)).join(' & ');
+  }
 
-  // TO DO: Generate typescript code from schema
-  switch (schemaType) {
-    case "number":
-    case "integer":
-    case "string":
-    case "boolean":
-    case "array":
-    case "object":
+  if (typeSchema.type === 'array' && typeSchema.items) {
+    return `${getGeneratedType(typeSchema.items, imports)}[]`;
+  }
+
+  if (typeSchema.enum) {
+    return typeSchema.enum.map(value => `"${value}"`).join(' | ');
+  }
+
+  switch (typeSchema.type) {
+    case 'integer':
+    case 'number':
+      return 'number';
+    case 'string':
+      return 'string';
+    case 'boolean':
+      return 'boolean';
+    case 'object':
+      if (typeSchema.properties) {
+        let propertiesCode = '';
+        const required = typeSchema.required || [];
+        
+        for (const [key, propertySchema] of Object.entries(typeSchema.properties)) {
+          const propertyType = getGeneratedType(propertySchema, imports);
+          const isRequired = required.includes(key);
+          propertiesCode += `  ${key}${isRequired ? '' : '?'}: ${propertyType};\n`;
+        }
+        return `{\n${propertiesCode}}`;
+      }
     default:
-      return "";
+      console.log(`Type non pris en charge: ${typeSchema.type}`);
   }
 }
-
+ 
+ function getGeneratedCode(typeName, schema) {
+  const imports = new Set();
+  const typeCode = getGeneratedType(schema, imports);
+  
+  const importsCode = Array.from(imports)
+    .map(type => `import { ${type} } from "./${type}";`)
+    .join('\n');
+ 
+  return `${importsCode ? importsCode + '\n\n' : ''}export type ${typeName} = ${typeCode};`;
+ }
 generateSpotifyClient();
